@@ -1,0 +1,41 @@
+# Exclude credentials and local runtime files
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.log
+*.aiff
+*.aif
+*.wav
+*.tmp
+*.bak
+.env
+.env.*
+*.pem
+*.key
+*token*
+*secret*
+*credential*
+*.sqlite
+*.db
+tmp/
+backups/
+.venv/
+*.jpg
+*.jpeg
+captures/
+
+# Local compiled OCR binary / protected runtime
+.bin/
+credentials/
+
+# Local developer and installer files
+.venv
+.pytest_cache/
+.mypy_cache/
+.coverage
+*.egg-info/
+dist/
+config.json
+tts.json
+*.plist

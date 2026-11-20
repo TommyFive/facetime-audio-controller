@@ -1,0 +1,59 @@
+name: Audited pre-release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: |
+          command -v ffmpeg || brew install ffmpeg
+          python -m pip install -r requirements.txt
+      - name: Privacy gate
+        run: python tools/privacy-check.py
+      - name: Full offline regression suite
+        env:
+          FACETIME_RECIPIENT: test-recipient@example.invalid
+        run: python -m unittest discover -s tests -v
+      - name: MCP protocol validation
+        run: python tests/mcp_protocol_smoke.py
+      - name: Package audited source without Git history
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # Git archive packages only tracked files from the tagged commit.
+          # No local build products, untracked secrets, old Git objects or refs.
+          git archive --format=tar --prefix="facetime-controller-$GITHUB_REF_NAME/" "$GITHUB_SHA" \
+            | gzip -n -9 > "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz"
+          (cd dist && shasum -a 256 "facetime-controller-$GITHUB_REF_NAME.tar.gz" > SHA256SUMS)
+          tar -tzf "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz" \
+            | grep -q "facetime-controller-$GITHUB_REF_NAME/LICENSE"
+      - name: Publish GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A corrected tag may rerun this workflow for an existing pre-release.
+          # Replace its two artifacts rather than fail or create a duplicate.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz" "dist/SHA256SUMS" \
+              --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME - distribution preview" --prerelease
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz" "dist/SHA256SUMS" \
+              --title "$GITHUB_REF_NAME - distribution preview" \
+              --generate-notes --prerelease --verify-tag
+          fi

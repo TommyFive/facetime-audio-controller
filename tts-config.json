@@ -1,0 +1,23 @@
+{
+  "provider": "minimax",
+  "fallback_provider": "macos",
+  "minimax": {
+    "endpoint": "https://api.minimax.io/v1/t2a_v2",
+    "model": "speech-2.8-hd",
+    "voice_id": "German_FriendlyMan",
+    "language_boost": "German",
+    "speed": 1.1,
+    "volume": 1,
+    "pitch": 0,
+    "request_timeout_seconds": 30,
+    "max_characters_by_model": {
+      "speech-2.8-turbo": 10000,
+      "speech-2.8-hd": 5000
+    }
+  },
+  "macos": {
+    "voice": "Anna",
+    "rate": 165,
+    "max_characters": null
+  }
+}

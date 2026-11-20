@@ -1,0 +1,11 @@
+{
+  "facetime": {
+    "recipient": "friend@example.invalid"
+  },
+  "audio": {
+    "device": "Loopback Audio"
+  },
+  "nanokvm": {
+    "endpoint": ""
+  }
+}
