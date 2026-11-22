@@ -1,4 +1,4 @@
-name: Audited pre-release
+name: Audited release
 
 on:
   push:
@@ -38,22 +38,46 @@ jobs:
           (cd dist && shasum -a 256 "facetime-controller-$GITHUB_REF_NAME.tar.gz" > SHA256SUMS)
           tar -tzf "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz" \
             | grep -q "facetime-controller-$GITHUB_REF_NAME/LICENSE"
-      - name: Publish GitHub pre-release
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # A corrected tag may rerun this workflow for an existing pre-release.
-          # Replace its two artifacts rather than fail or create a duplicate.
+
+          # Recognized SemVer only. Stable vX.Y.Z vs alpha/beta/rc suffixes.
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            is_prerelease=false
+            title="$GITHUB_REF_NAME"
+          elif [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$ ]]; then
+            is_prerelease=true
+            title="$GITHUB_REF_NAME - distribution preview"
+          else
+            echo "Unsupported release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+          if [[ "$is_prerelease" == false && -f "docs/release-notes-$GITHUB_REF_NAME.md" ]]; then
+            notes_args=(--notes-file "docs/release-notes-$GITHUB_REF_NAME.md")
+          else
+            notes_args=(--generate-notes)
+          fi
+
+          # Idempotent reruns; never force all releases to be pre-releases.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
               "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz" "dist/SHA256SUMS" \
               --clobber
             gh release edit "$GITHUB_REF_NAME" \
-              --title "$GITHUB_REF_NAME - distribution preview" --prerelease
+              --title "$title" --prerelease="$is_prerelease"
+            if [[ "$is_prerelease" == false ]]; then
+              gh release edit "$GITHUB_REF_NAME" --latest
+            fi
+          elif [[ "$is_prerelease" == true ]]; then
+            gh release create "$GITHUB_REF_NAME" \
+              "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz" "dist/SHA256SUMS" \
+              --title "$title" "${notes_args[@]}" --prerelease --verify-tag
           else
             gh release create "$GITHUB_REF_NAME" \
               "dist/facetime-controller-$GITHUB_REF_NAME.tar.gz" "dist/SHA256SUMS" \
-              --title "$GITHUB_REF_NAME - distribution preview" \
-              --generate-notes --prerelease --verify-tag
+              --title "$title" "${notes_args[@]}" --latest --verify-tag
           fi

@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.0 — first stable public release (2026-11-22)
+
+- Promote the audited FaceTime Audio Controller distribution to a stable, non-pre-release GitHub release.
+- Preserve CLI/MCP operations, asynchronous call supervision, safe hangup/recovery, optional NanoKVM locked-screen support, macOS/MiniMax Speech 2.8 TTS with fallback, and the guided installer.
+- Publish a versioned source archive and SHA-256 checksum through the GitHub Actions release workflow.
+- Classify future Semantic Versioning tags correctly: stable versions are marked Latest, and alpha/beta/rc tags remain pre-releases.
+- Automated regression testing is offline and does not replace a consented live FaceTime call or platform-specific acceptance tests.
+
 ## 3.0.0-beta.4 — public distribution snapshot
 
 - Start a completely new, single-root MIT-licensed Git repository from the audited source snapshot; no previous private Git objects, branches, releases, or tag objects are imported.
