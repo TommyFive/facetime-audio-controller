@@ -40,6 +40,14 @@ ENDPOINTS = {"api.minimax.io", "api.minimaxi.com", "local_macos"}
 MODELS = {"speech-2.8-turbo", "speech-2.8-hd", "macos"}
 API_RESULTS = {"generated", "api_error", "network_error", "invalid_audio", "local_error"}
 CALL_OUTCOMES = {"completed", "dial_only", "failed", "interrupted", "preflight_failed"}
+MINIMAX_MODELS = ("speech-2.8-turbo", "speech-2.8-hd")
+
+
+def _model_stats():
+    return {"attempts":0, "generated_responses":0, "submitted_characters":0,
+            "reported_usage_characters":0, "unknown_usage_attempts":0,
+            "rendered_count":0, "rendered_characters":0, "rendered_audio_seconds":0.0}
+
 
 
 def operation_id() -> str:
@@ -185,6 +193,8 @@ def summarize(events: list[dict], start_date=None, end_date=None) -> dict:
         "calls": 0, "calls_connected": 0, "calls_completed": 0,
         "calls_not_connected": 0, "calls_playback_completed": 0,
         "call_elapsed_seconds": 0, "by_render": {}, "by_api": {}, "by_outcome": {},
+        "minimax_total": _model_stats(),
+        "minimax_by_model": {model: _model_stats() for model in MINIMAX_MODELS},
     }
     def group(table, key):
         return table.setdefault(key, {"count": 0, "characters": 0, "audio_seconds": 0.0})
@@ -196,6 +206,15 @@ def summarize(events: list[dict], start_date=None, end_date=None) -> dict:
         if kind == "minimax_request":
             summary["minimax_requests"] += 1
             summary["minimax_input_characters"] += obj["input_characters"]
+            for stats in (summary["minimax_total"], summary["minimax_by_model"][obj["model"]]):
+                stats["attempts"] += 1
+                stats["submitted_characters"] += obj["input_characters"]
+                if obj["result"] == "generated":
+                    stats["generated_responses"] += 1
+                if obj["usage_characters"] is None:
+                    stats["unknown_usage_attempts"] += 1
+                else:
+                    stats["reported_usage_characters"] += obj["usage_characters"]
             key = obj["endpoint"] + " / " + obj["model"] + " / " + obj["result"]
             item = group(summary["by_api"], key)
             item["count"] += 1
@@ -210,6 +229,11 @@ def summarize(events: list[dict], start_date=None, end_date=None) -> dict:
             summary["rendered_count"] += 1
             summary["rendered_characters"] += obj["input_characters"]
             summary["rendered_audio_seconds"] += obj["audio_seconds"]
+            if obj["provider"] == "minimax":
+                for stats in (summary["minimax_total"], summary["minimax_by_model"][obj["model"]]):
+                    stats["rendered_count"] += 1
+                    stats["rendered_characters"] += obj["input_characters"]
+                    stats["rendered_audio_seconds"] += obj["audio_seconds"]
             lane = "fallback" if obj["fallback"] else "direct"
             key = obj["endpoint"] + " / " + obj["model"] + " / " + lane
             item = group(summary["by_render"], key)
@@ -228,4 +252,6 @@ def summarize(events: list[dict], start_date=None, end_date=None) -> dict:
     summary["call_elapsed_seconds"] = round(summary["call_elapsed_seconds"], 3)
     for item in summary["by_render"].values():
         item["audio_seconds"] = round(item["audio_seconds"], 3)
+    for stats in (summary["minimax_total"], *summary["minimax_by_model"].values()):
+        stats["rendered_audio_seconds"] = round(stats["rendered_audio_seconds"], 3)
     return summary

@@ -39,8 +39,12 @@ python3 tools/usage.py --json
 ```
 
 Date filters use the **UTC event date**, inclusive. Human reports show
-counts, model/endpoint/fallback splits and generated audio totals in hours.
-The JSON mode is read-only and returns the same aggregates for scripts.
+an explicit MiniMax TOTAL, and a MiniMax BY MODEL section (HD and Turbo,
+including unused models with zeros). Each model shows API requests, successful
+responses, input characters, provider-reported usage characters, unknown counts,
+finalized audio files and generated audio duration. macOS fallback is separate
+and excluded from the MiniMax total. Existing endpoint breakdowns remain.
+The JSON report includes `minimax_total` and `minimax_by_model`.
 
 The local file is:
 
