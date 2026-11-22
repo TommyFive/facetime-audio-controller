@@ -178,6 +178,71 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(len(report["by_api"]), 2)
         self.assertIn("local_macos / macos / fallback", report["by_render"])
 
+    def test_hd_turbo_totals_and_fallback_do_not_mix(self):
+        cases = [
+            ("speech-2.8-hd", "api.minimax.io", 100, 109, "generated", 12.5),
+            ("speech-2.8-turbo", "api.minimaxi.com", 250, 259, "generated", 20.5),
+            ("speech-2.8-hd", "api.minimax.io", 40, None, "network_error", None),
+            ("speech-2.8-turbo", "api.minimax.io", 15, 17, "generated", None),
+        ]
+        for model, endpoint, chars, provider_usage, result, audio_seconds in cases:
+            oid = usage.operation_id()
+            usage.append("minimax_request", operation_id=oid, endpoint=endpoint,
+                         model=model, input_characters=chars,
+                         usage_characters=provider_usage, result=result,
+                         elapsed_seconds=1.3)
+            if audio_seconds is not None:
+                usage.append("tts_render", operation_id=oid,
+                             requested_provider="minimax", provider="minimax",
+                             endpoint=endpoint, model=model,
+                             input_characters=chars, audio_seconds=audio_seconds,
+                             elapsed_seconds=1.0, fallback=False)
+        # Neither a direct local render nor a cloud-to-local fallback belongs
+        # to MiniMax's generated-audio total, but both count toward total audio.
+        for fallback, seconds in ((True, 7.0), (False, 8.0)):
+            usage.append("tts_render", operation_id=usage.operation_id(),
+                         requested_provider="minimax" if fallback else "macos",
+                         provider="macos", endpoint="local_macos", model="macos",
+                         input_characters=40, audio_seconds=seconds,
+                         elapsed_seconds=0.5, fallback=fallback)
+        report = usage.summarize(usage.read_events())
+        hd = report["minimax_by_model"]["speech-2.8-hd"]
+        turbo = report["minimax_by_model"]["speech-2.8-turbo"]
+        total = report["minimax_total"]
+        self.assertEqual((hd["attempts"], hd["submitted_characters"],
+                          hd["reported_usage_characters"], hd["unknown_usage_attempts"]),
+                         (2, 140, 109, 1))
+        self.assertEqual((turbo["attempts"], turbo["submitted_characters"],
+                          turbo["reported_usage_characters"], turbo["generated_responses"]),
+                         (2, 265, 276, 2))
+        self.assertEqual((hd["rendered_count"], hd["rendered_audio_seconds"]),
+                         (1, 12.5))
+        self.assertEqual((turbo["rendered_count"], turbo["rendered_audio_seconds"]),
+                         (1, 20.5))
+        self.assertEqual((total["attempts"], total["generated_responses"],
+                          total["submitted_characters"], total["reported_usage_characters"],
+                          total["unknown_usage_attempts"]),
+                         (4, 3, 405, 385, 1))
+        self.assertEqual((total["rendered_count"], total["rendered_characters"],
+                          total["rendered_audio_seconds"]), (2, 350, 33.0))
+        self.assertEqual(report["rendered_audio_seconds"], 48.0)
+        command=[sys.executable, str(ROOT / "tools" / "usage.py")]
+        cli=subprocess.run(command, capture_output=True, text=True, check=True, timeout=10)
+        self.assertIn("MiniMax TOTAL", cli.stdout)
+        self.assertIn("MiniMax BY MODEL", cli.stdout)
+        self.assertIn("speech-2.8-hd", cli.stdout)
+        self.assertIn("speech-2.8-turbo", cli.stdout)
+        json_cli=subprocess.run(command + ["--json"], capture_output=True, text=True,
+                                check=True, timeout=10)
+        self.assertEqual(json.loads(json_cli.stdout)["minimax_total"], total)
+
+    def test_zero_traffic_models_are_visible(self):
+        report = usage.summarize([])
+        self.assertEqual(set(report["minimax_by_model"]),
+                         {"speech-2.8-hd", "speech-2.8-turbo"})
+        self.assertEqual(report["minimax_total"]["rendered_audio_seconds"], 0)
+        self.assertEqual(report["minimax_by_model"]["speech-2.8-turbo"]["attempts"], 0)
+
     def test_cli_json_is_aggregate_only(self):
         add_call(usage.operation_id())
         proc = subprocess.run([sys.executable, str(ROOT / "tools" / "usage.py"), "--json"],

@@ -41,6 +41,16 @@ def main(argv=None):
     print("MiniMax input characters:       ", report["minimax_input_characters"])
     print("MiniMax known usage characters: ", report["minimax_usage_characters_known"])
     print("MiniMax attempts without usage: ", report["minimax_usage_unknown"])
+    def model_row(label, stats):
+        print("  " + label)
+        print(f'    Requests: {stats["attempts"]}; successful API responses: {stats["generated_responses"]}')
+        print(f'    Submitted characters: {stats["submitted_characters"]}; provider usage characters: {stats["reported_usage_characters"]}; unknown usage: {stats["unknown_usage_attempts"]}')
+        print(f'    Rendered files: {stats["rendered_count"]}; rendered characters: {stats["rendered_characters"]}; audio: {stats["rendered_audio_seconds"]:.3f} s ({stats["rendered_audio_seconds"]/3600:.4f} hours)')
+    print("\nMiniMax TOTAL (HD + Turbo, excluding macOS fallback):")
+    model_row("All MiniMax models", report["minimax_total"])
+    print("\nMiniMax BY MODEL:")
+    for model in usage.MINIMAX_MODELS:
+        model_row(model, report["minimax_by_model"][model])
     print("Completed TTS renderings:       ", report["rendered_count"])
     print("Rendered input characters:     ", report["rendered_characters"])
     print("Generated audio:               ", f'{report["rendered_audio_seconds"]/3600:.3f} hours')
