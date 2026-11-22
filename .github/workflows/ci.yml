@@ -37,6 +37,7 @@ jobs:
       - name: Complete no-call regression suite
         env:
           FACETIME_RECIPIENT: test-recipient@example.invalid
+          FACETIME_USAGE_DIR: ${{ runner.temp }}/facetime-usage-test
         run: python -m unittest discover -s tests -v
       - name: MCP stdio negotiation, no outgoing call
         run: python tests/mcp_protocol_smoke.py

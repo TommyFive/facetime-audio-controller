@@ -22,6 +22,7 @@ import tempfile
 import time
 
 import facetime_runtime as runtime
+import facetime_usage as usage
 DIR = pathlib.Path(__file__).resolve().parent
 SCRIPT = str(DIR / "facetime-call.sh")
 GUI_CHECK = str(DIR / "facetime-gui-session.py")
@@ -295,6 +296,13 @@ def playback_timeout_seconds(audio_seconds):
 def main(args):
     opt=options_parse(args)
     runtime.require_recipient()
+    usage_id=usage.operation_id()
+    usage_started=time.monotonic()
+    connected_at=None
+    playback_seconds=None
+    dial_requested=False
+    playback_completed=False
+    hangup_verified=False
     if not opt.dial_only and not pathlib.Path(FFMPEG).is_file():
         raise RuntimeError("FFmpeg unavailable")
     # Acquire BEFORE any FaceTime-changing operation. This lock is never
@@ -347,7 +355,8 @@ def main(args):
                     log("TTS_RENDER_START")
                     # Cancellable subprocess: emergency --hangup/--cancel-pending
                     # can interrupt API rendering as well as active TTS playback.
-                    stdout,duration=guarded(tts_args,110,run_id,"TTS renderer")
+                    stdout,duration=guarded(tts_args,110,run_id,"TTS renderer",
+                                             env={"FACETIME_USAGE_ID":usage_id})
                     try:
                         info=json.loads(stdout.splitlines()[-1])
                         if not info.get("ok") or info["provider"] not in ("minimax","macos"):
@@ -389,6 +398,7 @@ def main(args):
                 # after this point may require recovery even on URL failure.
                 txn.update(run_id,"DIAL_REQUESTED",url_may_have_been_sent=True)
                 started=True
+                dial_requested=True
                 dial_start=dt.datetime.now()
                 log("DIAL_START")
                 if state=="GUI_LOCKED":
@@ -463,6 +473,7 @@ def main(args):
                             time.sleep(.25)
                             continue
                         if detected:
+                            connected_at=time.monotonic()
                             log(f"CONNECTED event={detected.isoformat(timespec='milliseconds')} "
                                 f"recognition_lag={(dt.datetime.now()-detected).total_seconds():.3f}s")
                             break
@@ -488,6 +499,8 @@ def main(args):
                         "audiotoolbox","-audio_device_index",device,"-"],
                         playback_timeout_seconds(info["audio_seconds"]),run_id,"Loopback TTS",
                         connection_since=detected)
+                    playback_completed=True
+                    playback_seconds=duration
                     log(f"PLAY_END seconds={duration:.3f}")
                 successful=True
         except txn.Interrupted as exc:
@@ -509,6 +522,7 @@ def main(args):
                     else:
                         guarded([SCRIPT,"--_hangup-ax"],34,run_id,"AX hangup",
                                 env={"FACETIME_INTERNAL_HANGUP":run_id})
+                    hangup_verified=True
                     log("HANGUP_OK")
                 except txn.Interrupted as exc:
                     priority_interrupt=True
@@ -531,6 +545,17 @@ def main(args):
             except txn.Interrupted:
                 # Emergency client may have already started a later run.
                 pass
+            outcome=("interrupted" if priority_interrupt else
+                     "dial_only" if opt.dial_only and successful else
+                     "completed" if successful and hangup_verified and playback_completed else
+                     "preflight_failed" if not started else "failed")
+            usage.record(
+                "call_result",operation_id=usage_id,outcome=outcome,
+                dial_requested=dial_requested,connected=connected_at is not None,
+                playback_completed=playback_completed,hangup_verified=hangup_verified,
+                elapsed_seconds=time.monotonic()-usage_started,
+                connected_seconds=(time.monotonic()-connected_at) if connected_at is not None else None,
+                playback_seconds=playback_seconds)
         if error:
             if cleanup_error:
                 raise RuntimeError(str(error)+"; cleanup="+str(cleanup_error))
