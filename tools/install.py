@@ -18,6 +18,7 @@ import sys
 import time
 import venv
 import tempfile
+import shlex
 # Permit safe importlib-based loading by the unit suite, not just CLI execution.
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import setup_wizard
@@ -31,7 +32,7 @@ SOURCE_FILES=[
     "facetime-ax-control.applescript","facetime-gui-session.py",
     "facetime-display-wake.py","facetime-permissions.py",
     "facetime-audio-health.py","facetime-vision-ocr.swift",
-    "facetime-tts.py","facetime-say.sh","facetime_txn.py",
+    "facetime-tts.py","facetime-say.sh","facetime_txn.py","facetime_usage.py",
     "facetime-priority.py","facetime-mcp-server.py",
     "facetime-async-watchdog.py","facetime_async_worker.py","nanokvm-mcp-bridge.py",
     "nanokvm-popup-detector.py","nanokvm-call-ui.py",
@@ -39,7 +40,8 @@ SOURCE_FILES=[
 ]
 TOOLS=["provision-nanokvm-auth.py","facetime_tunnel_service.py",
        "install-tunnel.sh","uninstall-tunnel.sh","status-tunnel.sh",
-       "doctor.py","install.py","setup_wizard.py","openclaw_integration.py"]
+       "doctor.py","usage.py","cli.py",
+       "install.py","setup_wizard.py","openclaw_integration.py"]
 
 def run(*command,**opts):
     return subprocess.run(list(map(str,command)),check=True,**opts)
@@ -156,13 +158,18 @@ def compile_ocr(dst:Path):
     binary.chmod(0o700)
 
 def wrapper(path:Path,current:Path,command:str):
-    executable=(str(current/".venv/bin/python")+'" "'+str(current/command)) if command.endswith(".py") else str(current/command)
-    text="#!/bin/sh\nexec "+'"'+executable+'"'+' "$@"\n'
-    if path.exists() and not path.is_file():raise RuntimeError("Cannot overwrite non-file wrapper")
+    """Create a shell launcher; quote argv tokens individually (also with spaces)."""
+    executable=([str(current/".venv/bin/python"),str(current/command)]
+                if command.endswith(".py") else [str(current/command)])
+    contents="#!/bin/sh\nexec "+" ".join(shlex.quote(part) for part in executable)+' "$@"\n'
+    if path.is_symlink():
+        raise RuntimeError("Refusing symlink wrapper: "+str(path))
+    if path.exists() and not path.is_file():
+        raise RuntimeError("Cannot overwrite non-file wrapper")
     if path.exists() and str(current) not in path.read_text():
         raise RuntimeError("Refusing to overwrite unrelated existing command: "+str(path))
     path.parent.mkdir(parents=True,exist_ok=True)
-    path.write_text(text)
+    path.write_text(contents)
     path.chmod(0o755)
 
 def mcp_example(current,p):
@@ -251,6 +258,7 @@ def install(args):
         link.symlink_to(Path("versions")/new.name)
         os.replace(link,current)
         switched=True
+        wrapper(p["bin"]/"facetime-controller",current,"tools/cli.py")
         wrapper(p["bin"]/"facetime-call",current,"facetime-call.sh")
         wrapper(p["bin"]/"facetime-controller-doctor",current,"tools/doctor.py")
         mcp_example(current,p)
@@ -336,7 +344,7 @@ def uninstall(args):
         return 0
     service=f"gui/{os.getuid()}/{LABEL}"
     remove_agent(p)
-    for name in ("facetime-call","facetime-controller-doctor"):
+    for name in ("facetime-controller","facetime-call","facetime-controller-doctor"):
         file=p["bin"]/name
         if file.is_file() and str(p["current"]) in file.read_text():file.unlink()
     if p["current"].is_symlink():p["current"].unlink()

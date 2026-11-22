@@ -24,11 +24,11 @@ The installer runs as the current macOS user and does not use sudo. It creates a
 
 Run the read-only diagnostic after installation:
 
-    ~/.local/bin/facetime-controller-doctor --permissions
+    ~/.local/bin/facetime-controller doctor --permissions
 
 Only place a real call when the recipient has agreed to the test:
 
-    ~/.local/bin/facetime-call --call 'This is a controlled FaceTime Audio test.'
+    ~/.local/bin/facetime-controller call 'This is a controlled FaceTime Audio test.'
 
 ## Guided installer and OpenClaw integration
 
@@ -94,8 +94,8 @@ characters are recorded only when the API supplies them; otherwise the field is
 unknown, never fabricated. Fallback macOS audio is a distinct reporting lane.
 
 ```bash
-python3 tools/usage.py
-python3 tools/usage.py --since 2026-11-01 --json
+facetime-controller stats
+facetime-controller stats --since 2026-11-01 --json
 ```
 
 Owner-only records are stored outside the repository in
