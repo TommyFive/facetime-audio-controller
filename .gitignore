@@ -39,3 +39,6 @@ dist/
 config.json
 tts.json
 *.plist
+
+# Local privacy-preserving usage journal (must never enter a release)
+usage.jsonl

@@ -83,3 +83,21 @@ Calls cannot be rolled back transactionally. The controller uses a durable journ
 Cloud TTS sends message text to MiniMax. Select local macOS TTS if cloud transmission is inappropriate. Never commit settings, credentials, call transcripts, screenshots or logs.
 
 [MIT License](LICENSE) | [Security](SECURITY.md)
+
+## Usage journal (local CLI, no MCP tools)
+
+Speech synthesis is counted at successful generation, independently from whether
+FaceTime connects. A separate call result records whether the call was dialed,
+connected, played and verified as hung up. No message text, phone numbers,
+recipients, API keys, file paths, or pricing are stored. MiniMax service usage
+characters are recorded only when the API supplies them; otherwise the field is
+unknown, never fabricated. Fallback macOS audio is a distinct reporting lane.
+
+```bash
+python3 tools/usage.py
+python3 tools/usage.py --since 2026-11-01 --json
+```
+
+Owner-only records are stored outside the repository in
+`~/.local/state/facetime-controller/usage.jsonl` (mode 0600, parent 0700).
+The report is read-only. See [usage journal and CLI](docs/usage-journal.md).

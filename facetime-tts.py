@@ -21,6 +21,7 @@ import urllib.request
 
 DIR=pathlib.Path(__file__).resolve().parent
 import facetime_runtime as runtime
+import facetime_usage as usage
 CONFIG=runtime.tts_config_file(DIR/"tts-config.json")
 SECRETS=runtime.minimax_key_file()
 FFMPEG=runtime.executable("ffmpeg")
@@ -96,55 +97,85 @@ def read_key():
         raise TTSError("key_unavailable") from exc
 
 def request_minimax(text,settings,target_mp3):
-    payload={
-        "model":settings["model"],"text":text,
-        "stream":False,"output_format":"hex",
-        "language_boost":settings["language_boost"],
-        "voice_setting":{
-            "voice_id":settings["voice_id"],"speed":settings["speed"],
-            "vol":settings["volume"],"pitch":settings["pitch"]
-        },
-        "audio_setting":{
-            "sample_rate":32000,"bitrate":128000,
-            "format":"mp3","channel":1
+    """Capture an API attempt when issued, even if FaceTime is never dialed.
+
+    The provider's reported usage_characters is recorded separately from the
+    literal input length. Missing billing metadata stays unknown, not zero.
+    """
+    started=time.monotonic()
+    sent=False
+    result="local_error"
+    charged=None
+    try:
+        payload={
+            "model":settings["model"],"text":text,
+            "stream":False,"output_format":"hex",
+            "language_boost":settings["language_boost"],
+            "voice_setting":{
+                "voice_id":settings["voice_id"],"speed":settings["speed"],
+                "vol":settings["volume"],"pitch":settings["pitch"]
+            },
+            "audio_setting":{
+                "sample_rate":32000,"bitrate":128000,
+                "format":"mp3","channel":1
+            }
         }
-    }
-    request=urllib.request.Request(
-        settings["endpoint"],
-        data=json.dumps(payload,ensure_ascii=False,separators=(",",":")).encode("utf-8"),
-        headers={"Authorization":"Bearer "+read_key(),"Content-Type":"application/json",
-                 "Accept":"application/json"},
-        method="POST")
-    try:
-        with urllib.request.urlopen(request,timeout=settings["request_timeout_seconds"]) as response:
-            if response.status!=200:
-                raise TTSError("http_"+str(response.status))
-            raw=response.read(16_000_001)
-            if len(raw)>16_000_000:
-                raise TTSError("response_too_large")
-    except urllib.error.HTTPError as exc:
-        raise TTSError("http_"+str(exc.code)) from None
-    except (urllib.error.URLError,TimeoutError,OSError) as exc:
-        raise TTSError("network_"+type(exc).__name__) from None
-    try:
-        data=json.loads(raw)
-        status=(data.get("base_resp") or {}).get("status_code")
-        if status!=0:
-            raise TTSError("api_status_"+str(status)[:12])
-        if (data.get("data") or {}).get("status") not in (None,2):
-            raise TTSError("audio_not_complete")
-        audio_hex=(data.get("data") or {}).get("audio")
-        if not isinstance(audio_hex,str) or len(audio_hex)<2000:
-            raise TTSError("audio_missing")
-        audio=bytes.fromhex(audio_hex)
-        if len(audio)<1000 or not (audio.startswith(b"ID3") or
-                (audio[0]==255 and (audio[1]&0xe0)==0xe0)):
-            raise TTSError("audio_invalid_mp3")
-    except (ValueError,TypeError,AttributeError,IndexError) as exc:
-        raise TTSError("api_response_invalid") from exc
-    target_mp3.write_bytes(audio)
-    os.chmod(target_mp3,0o600)
-    return len(audio)
+        request=urllib.request.Request(
+            settings["endpoint"],
+            data=json.dumps(payload,ensure_ascii=False,separators=(",",":")).encode("utf-8"),
+            headers={"Authorization":"Bearer "+read_key(),"Content-Type":"application/json",
+                     "Accept":"application/json"},
+            method="POST")
+        try:
+            sent=True
+            with urllib.request.urlopen(request,timeout=settings["request_timeout_seconds"]) as response:
+                if response.status!=200:
+                    result="api_error"
+                    raise TTSError("http_"+str(response.status))
+                raw=response.read(16_000_001)
+                if len(raw)>16_000_000:
+                    result="invalid_audio"
+                    raise TTSError("response_too_large")
+        except urllib.error.HTTPError as exc:
+            result="api_error"
+            raise TTSError("http_"+str(exc.code)) from None
+        except (urllib.error.URLError,TimeoutError,OSError) as exc:
+            result="network_error"
+            raise TTSError("network_"+type(exc).__name__) from None
+        result="invalid_audio"
+        try:
+            data=json.loads(raw)
+            extra=data.get("extra_info") or {}
+            count=extra.get("usage_characters")
+            if type(count) is int and 0<=count<=10000000:
+                charged=count
+            status=(data.get("base_resp") or {}).get("status_code")
+            if status!=0:
+                result="api_error"
+                raise TTSError("api_status_"+str(status)[:12])
+            if (data.get("data") or {}).get("status") not in (None,2):
+                raise TTSError("audio_not_complete")
+            audio_hex=(data.get("data") or {}).get("audio")
+            if not isinstance(audio_hex,str) or len(audio_hex)<2000:
+                raise TTSError("audio_missing")
+            audio=bytes.fromhex(audio_hex)
+            if len(audio)<1000 or not (audio.startswith(b"ID3") or
+                    (audio[0]==255 and (audio[1]&0xe0)==0xe0)):
+                raise TTSError("audio_invalid_mp3")
+        except (ValueError,TypeError,AttributeError,IndexError) as exc:
+            raise TTSError("api_response_invalid") from exc
+        target_mp3.write_bytes(audio)
+        os.chmod(target_mp3,0o600)
+        result="generated"
+        return len(audio)
+    finally:
+        if sent:
+            usage.record(
+                "minimax_request",operation_id=usage.operation_id(),
+                endpoint=settings["endpoint"].split("/")[2],model=settings["model"],
+                input_characters=len(text),usage_characters=charged,
+                result=result,elapsed_seconds=time.monotonic()-started)
+
 
 def safe_run(args,seconds,code):
     try:
@@ -235,10 +266,18 @@ def render(text,config,out,provider=None,speed=None,volume=None,pitch=None,voice
             duration=render_macos(text,config["macos"],tmp_aiff)
         os.replace(tmp_aiff,target)
         os.chmod(target,0o600)
+    elapsed=round(time.monotonic()-start,3)
+    usage.record(
+        "tts_render",operation_id=usage.operation_id(),
+        requested_provider=selected,provider=result_provider,
+        endpoint=mm["endpoint"].split("/")[2] if result_provider=="minimax" else "local_macos",
+        model=mm["model"] if result_provider=="minimax" else "macos",
+        input_characters=len(text),audio_seconds=duration,
+        elapsed_seconds=elapsed,fallback=bool(fallback_reason))
     return {
         "provider":result_provider,"requested":selected,"fallback":bool(fallback_reason),
         "fallback_reason":fallback_reason or "none",
-        "audio_seconds":duration,"elapsed_seconds":round(time.monotonic()-start,3),
+        "audio_seconds":duration,"elapsed_seconds":elapsed,
         "size_bytes":target.stat().st_size,
         "model":mm["model"] if result_provider=="minimax" else "macos",
         "voice":mm["voice_id"] if result_provider=="minimax" else config["macos"]["voice"],
