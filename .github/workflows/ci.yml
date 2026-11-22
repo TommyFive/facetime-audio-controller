@@ -55,6 +55,10 @@ jobs:
           # --skip-deps is deliberately not a ready installation: doctor returns 2.
           test "$result" -eq 2
           test -x "$RUNNER_TEMP/facetime-package/current/.bin/facetime-vision-ocr"
+          test -x "$RUNNER_TEMP/facetime-bin/facetime-controller"
+          FACETIME_USAGE_DIR="$RUNNER_TEMP/usage-e2e" "$RUNNER_TEMP/facetime-bin/facetime-controller" stats --json > "$RUNNER_TEMP/stats.json"
+          python -c 'import json,sys; x=json.load(open(sys.argv[1])); assert set(x["minimax_by_model"]) == {"speech-2.8-hd","speech-2.8-turbo"}' "$RUNNER_TEMP/stats.json"
+          "$RUNNER_TEMP/facetime-bin/facetime-controller" --help >/dev/null
           test -f "$RUNNER_TEMP/facetime-config/config.json"
           test "$(stat -f %Lp "$RUNNER_TEMP/facetime-config/config.json")" -eq 600
           python -m json.tool "$RUNNER_TEMP/facetime-config/config.json" >/dev/null
