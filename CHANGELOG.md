@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.2.0 — unified CLI and privacy-preserving usage reporting (2026-11-22)
+
+- Add a unified `facetime-controller` command with `doctor` and `stats` alongside the existing call, speech, status, hangup and recovery functions. Preserve legacy `facetime-call` and `facetime-controller-doctor` wrappers.
+- Introduce a local, owner-only speech-usage journal that records MiniMax API attempts, generated audio durations and FaceTime connection/playback/hangup outcomes without storing speech text or credentials.
+- Show separate MiniMax Speech 2.8 HD and Turbo summaries plus combined MiniMax totals. Keep macOS direct and fallback audio separate; distinguish provider-reported characters from submitted characters.
+- Package all CLI and journal dependencies through the installer, fix Python wrapper argument quoting and reject unsafe symlink wrappers.
+- Add regression coverage, privacy checks and isolated macOS installer smoke tests to the GitHub Actions CI pipeline.
+- This is a source release: it does not automatically replace or restart an existing private runtime or its MCP/tunnel configuration.
+
 ## 3.1.0 — first stable public release (2026-11-22)
 
 - Promote the audited FaceTime Audio Controller distribution to a stable, non-pre-release GitHub release.
