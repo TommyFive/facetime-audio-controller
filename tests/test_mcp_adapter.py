@@ -31,7 +31,7 @@ class MCPAdapterTests(unittest.TestCase):
     def test_max_lifecycle_budget_and_verified_completion(self):
         import subprocess
         budget = module.call_timeout_seconds(20, 60, 24)
-        self.assertGreater(budget, 1215)
+        self.assertEqual(budget, 1745)
         self.assertLess(budget, 1900)
         output = ("TTS_RENDER_READY provider=minimax requested=minimax fallback=False\n"
                   "CONNECTED event=2026-11-20T10:01:00\n"

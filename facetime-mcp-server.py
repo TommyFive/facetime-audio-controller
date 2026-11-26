@@ -163,7 +163,7 @@ def call_timeout_seconds(confirm_timeout: int, answer_timeout: int,
     """
     return int(
         110  # MiniMax render and conversion
-        + 55 + 30  # bounded NanoKVM recovery and display/preflight
+        + 115 + 30  # bounded NanoKVM recovery and display/preflight
         + confirm_timeout + 45  # confirmation / GUI allowance
         + answer_timeout + 30  # answer detection and CallServices retries
         + 1215  # verified maximum playback + 15-second watchdog
@@ -392,7 +392,7 @@ def facetime_call_start(message: str, request_id: str, provider: str = "minimax"
             record=dict(request_id=request_id,fingerprint=fingerprint,
                         state="starting",ok=False,created_at=time.time(),
                         updated_at=time.time(),started_at=time.time(),
-                        deadline_at=time.time()+1680)
+                        deadline_at=time.time()+1740)
             fd,tmp=tempfile.mkstemp(prefix=".state-",dir=ASYNC_DIR)
             with os.fdopen(fd,"w") as out:
                 os.fchmod(out.fileno(),0o600)

@@ -169,6 +169,97 @@ def verified_pending(state):
             and state.get("count",0)>=1
             and state.get("count")==state.get("badge_count"))
 
+class StalePendingCard(RuntimeError):
+    """One verified pending card survived a confirmed gray cancel."""
+    def __init__(self, state):
+        super().__init__("RECOVERY_NO_MONOTONIC_REDUCTION; NO_MORE_CLICKS")
+        self.state=state
+
+
+# macOS does not expose CXCallObserver to native macOS apps. Query the local
+# TelephonyUtilities call center, never treat an unavailable probe as idle.
+# This private API is optional and may stop working after an OS update.
+CALL_STATE_PROBE = r"""
+import Foundation
+import Darwin
+guard dlopen("/System/Library/PrivateFrameworks/TelephonyUtilities.framework/TelephonyUtilities", RTLD_NOW) != nil,
+      let cls = NSClassFromString("TUCallCenter") as? NSObject.Type else { exit(2) }
+let shared = NSSelectorFromString("sharedInstance")
+guard cls.responds(to: shared),
+      let center = cls.perform(shared)?.takeUnretainedValue() as? NSObject else { exit(3) }
+for _ in 0..<2 {
+    RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+    for name in ["currentCalls", "currentAudioAndVideoCalls", "currentVideoCalls"] {
+        let selector = NSSelectorFromString(name)
+        guard center.responds(to: selector),
+              let calls = center.perform(selector)?.takeUnretainedValue() as? NSArray else { exit(4) }
+        if calls.count != 0 { print("BUSY"); exit(0) }
+    }
+}
+print("IDLE")
+"""
+NOTIFICATION_PROCESSES=("FaceTimeNotificationService","FaceTimeNotificationExtension")
+
+
+def require_idle_call_center():
+    """Fail closed on any busy, unavailable, malformed or failed native probe."""
+    if sys.platform!="darwin":
+        raise RuntimeError("RECOVERY_CALL_STATE_UNAVAILABLE")
+    try:
+        result=subprocess.run(["/usr/bin/swift","-e",CALL_STATE_PROBE],
+                              capture_output=True,text=True,timeout=12)
+    except (OSError,subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("RECOVERY_CALL_STATE_UNAVAILABLE") from exc
+    if result.returncode!=0 or result.stderr.strip() or result.stdout.strip()!="IDLE":
+        raise RuntimeError("RECOVERY_CALL_STATE_NOT_VERIFIED_IDLE")
+
+
+def require_recovery_owner():
+    if not RUN_ID or os.getuid()==0:
+        raise RuntimeError("RECOVERY_NOTIFICATION_RESET_NOT_AUTHORIZED")
+    record=txn.check(RUN_ID)
+    if (record.get("stage")!="RECOVERING" or record.get("previous_stage")!="RECOVERY_REQUIRED"
+            or record.get("notification_reset_eligible") is not True
+            or record.get("url_may_have_been_sent") is True):
+        raise RuntimeError("RECOVERY_NOTIFICATION_RESET_NOT_AUTHORIZED")
+
+
+def reset_stale_notification(bridge,detector,tmp,stale):
+    """One bounded, same-user reset, only for a verified unchanged pending card.
+
+    Called under the UI mutex and outgoing transaction lock. Never used by
+    manual hangup/cancel, for active/held/multiple/unknown cards, or on a
+    first-time idle transaction. No broad process kills or service restart.
+    """
+    require_recovery_owner()
+    require_idle_call_center()
+    fresh=capture(bridge,detector,tmp,"reset-verify")
+    time.sleep(.5)
+    final=capture(bridge,detector,tmp,"reset-preflight")
+    if not all(verified_pending(x) and x.get("count")==1 for x in (stale,fresh,final)) or not (
+            stable(stale,fresh,"SINGLE") and stable(fresh,final,"SINGLE")):
+        raise RuntimeError("RECOVERY_NOTIFICATION_CARD_CHANGED")
+    require_idle_call_center()
+    require_recovery_owner()
+    terminated=False
+    for name in NOTIFICATION_PROCESSES:
+        require_recovery_owner()
+        result=subprocess.run(["/usr/bin/pkill","-TERM","-x","-u",str(os.getuid()),name],
+                              capture_output=True,text=True,timeout=5)
+        if result.returncode not in (0,1):
+            raise RuntimeError("RECOVERY_NOTIFICATION_RESET_FAILED")
+        terminated |= result.returncode==0
+    if not terminated:
+        raise RuntimeError("RECOVERY_NOTIFICATION_PROCESS_NOT_FOUND")
+    log("RECOVERY_NOTIFICATION_RESET_SENT")
+    time.sleep(1)
+    stable_quiescence(bridge,detector,tmp,seconds=3.5)
+    require_idle_call_center()
+    require_recovery_owner()
+    log("RECOVERY_NOTIFICATION_RESET_VERIFIED")
+    return True
+
+
 def clear_pending_cards(bridge,detector,tmp,max_clicks=3):
     """Remove visible old pending cards, including a verified multi-card group.
 
@@ -207,6 +298,9 @@ def clear_pending_cards(bridge,detector,tmp,max_clicks=3):
             log("RECOVERY_ALL_CARDS_CLEARED")
             return True
         if not verified_pending(after) or after["count"]>=third["count"]:
+            if (verified_pending(after) and third.get("count")==after.get("count")==1
+                    and stable(third,after,"SINGLE")):
+                raise StalePendingCard(after)
             raise RuntimeError("RECOVERY_NO_MONOTONIC_REDUCTION; NO_MORE_CLICKS")
     return False
 
@@ -235,7 +329,12 @@ def recover(bridge,detector,tmp):
     if first["status"]=="UNAVAILABLE":
         dismiss_unavailable(bridge,detector,tmp)
     elif first["status"]!="NONE":
-        clear_pending_cards(bridge,detector,tmp,max_clicks=3)
+        try:
+            clear_pending_cards(bridge,detector,tmp,max_clicks=3)
+        except StalePendingCard as exc:
+            reset_stale_notification(bridge,detector,tmp,exc.state)
+            log("RECOVERY_IDLE_VERIFIED")
+            return True
     stable_quiescence(bridge,detector,tmp,seconds=3.5)
     log("RECOVERY_IDLE_VERIFIED")
     return True

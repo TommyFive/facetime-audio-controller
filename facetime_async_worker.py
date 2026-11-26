@@ -19,7 +19,7 @@ import time
 from facetime_runtime import state_dir
 STATE=state_dir()/"mcp/async"
 CONTROLLER=Path(__file__).resolve().parent/"facetime-call.sh"
-MAX_RUNTIME=1680
+MAX_RUNTIME=1740
 def path(request_id): return STATE/(request_id+".json")
 def load(request_id): return json.loads(path(request_id).read_text())
 def atomic(request_id, data):

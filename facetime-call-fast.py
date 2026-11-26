@@ -276,6 +276,7 @@ def kvm(args, timeout, label, run_id):
                 ("PREFLIGHT_CLEAR","CONFIRM_CLICK_SENT","CONFIRM_SENT_FAST",
                  "PENDING_CANCELLED_VERIFIED","RECOVERY_ALL_CARDS_CLEARED",
                  "RECOVERY_IDLE_VERIFIED","QUIESCENT_EMPTY",
+                 "RECOVERY_NOTIFICATION_RESET_SENT","RECOVERY_NOTIFICATION_RESET_VERIFIED",
                  "HANGUP_CLICK_SENT","HANGUP_VERIFIED","HANGUP_ALREADY_CLEAR",
                  "HANGUP_CANCELLED_PENDING_INSTEAD","RESUME_HELD_CLICK_SENT",
                  "UNAVAILABLE_CARD_VERIFIED","UNAVAILABLE_DISMISS_CLICK_SENT",
@@ -380,8 +381,12 @@ def main(args):
                     # regardless of stale journal stage, with a fixed budget
                     # and stable empty-screen quiescence.
                     txn.update(run_id,"RECOVERING",
-                               previous_stage=previous.get("stage","IDLE"))
-                    kvm(["recover"],55,"NanoKVM bounded recovery",run_id)
+                               previous_stage=previous.get("stage","IDLE"),
+                               notification_reset_eligible=(
+                                   previous.get("stage")=="RECOVERY_REQUIRED"
+                                   and previous.get("url_may_have_been_sent") is True
+                                   and str(previous.get("last_error","")).startswith("ANSWER_TIMEOUT;")))
+                    kvm(["recover"],115,"NanoKVM bounded recovery",run_id)
                     txn.update(run_id,"PREFLIGHT")
                 else:
                     txn.check(run_id)
