@@ -20,3 +20,8 @@ Manual diagnosis of the virtual audio route may use the separate `facetime-audio
 An incomplete async call must be examined with `facetime_call_status` and `facetime_status`. Priority `--hangup` may safely end an identifiable active FaceTime UI. Do not repeatedly dial while the result is uncertain.
 
 For installer troubles, inspect the generated version directory, the current symlink and the dedicated launchd label. The uninstall process preserves configuration, state and older versions by default.
+
+
+## Stale pending card after an answer timeout
+
+During the next locked-screen outgoing preflight, the controller first tries normal verified gray-button cancellation. If the same single recipient card survives, it may perform one current-user-only notification reset after fresh visual and native idle checks. This is restricted to a recorded answer timeout and does not terminate the call-services daemon. If the private macOS call-state query is unavailable or any visual or transaction check fails, no new call is placed. Inspect the UI and resolve the uncertain state manually; do not repeatedly trigger outgoing calls to bypass the guard. Display sleep is handled by the existing display-wake helper before capture.

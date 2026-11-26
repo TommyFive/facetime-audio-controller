@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.2.1 — bounded stale FaceTime notification recovery (2026-11-26)
+
+- After an answer timeout, allow a single guarded notification-process reset during the next locked-screen preflight if a verified, unchanged pending recipient card survives its normal cancel click.
+- Require transaction ownership, fresh matching screenshots, an idle native call-center probe and post-reset quiescence; refuse escalation on ambiguous, busy, unsupported or changed state.
+- Scope SIGTERM to the current user's two exact FaceTime notification processes; never restart the call-service daemon or reboot the host.
+- Add offline safety tests and macOS SDK type checking of the native probe.
+
 ## 3.2.0 — unified CLI and privacy-preserving usage reporting (2026-11-22)
 
 - Add a unified `facetime-controller` command with `doctor` and `stats` alongside the existing call, speech, status, hangup and recovery functions. Preserve legacy `facetime-call` and `facetime-controller-doctor` wrappers.
