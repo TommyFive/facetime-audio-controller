@@ -51,6 +51,20 @@ def capture(bridge,detector,tmp,name):
         f"badges={state.get('badge_count')} target={state.get('target_verified')}")
     return state
 
+def action_view(state,kind):
+    # Only the explicit action consumer may project a mixed group.
+    # Keep raw state for recovery, cancellation and diagnostic output.
+    expected="MIXED_PENDING" if kind=="SINGLE" else "MIXED_ACTIVE"
+    field="pending_buttons" if kind=="SINGLE" else "active_buttons"
+    if state.get("status")!=expected:
+        return state
+    selected=state.get(field,[])
+    if len(selected)!=1 or not state.get("target_verified"):
+        return state
+    key="buttons" if kind=="SINGLE" else "red_buttons"
+    return {**state,"status":kind,key:selected,"mixed_group":True}
+
+
 def position(state,which):
     key={"SINGLE":"buttons","ACTIVE":"red_buttons","UNAVAILABLE":"buttons"}[which]
     arr=state.get(key,[])
@@ -134,6 +148,13 @@ def dismiss_unavailable(bridge,detector,tmp):
     after sending the gray-X click. Verify the card is gone on two frames.
     """
     first=capture(bridge,detector,tmp,"unavailable-first")
+    if first.get("status")=="NONE":
+        # Notification may expire between the caller's verified observation
+        # and the dismissal. No click; verify stable empty UI and native idle.
+        stable_quiescence(bridge,detector,tmp,seconds=3.5)
+        require_idle_call_center()
+        log("UNAVAILABLE_DISMISSED_VERIFIED already_clear=true")
+        return True
     if (first.get("status")!="UNAVAILABLE" or
         not first.get("unavailable_verified") or
         not first.get("target_verified") or
@@ -345,7 +366,7 @@ def confirm(bridge,detector,tmp,deadline_s=20,fast_return=True,cancel_on_timeout
     render_started=None
     seq=0
     while time.monotonic()<deadline:
-        now=capture(bridge,detector,tmp,f"pending-{seq}")
+        now=action_view(capture(bridge,detector,tmp,f"pending-{seq}"),"SINGLE")
         seq+=1
         if now["status"] in ("MULTIPLE","AMBIGUOUS_EXISTING_CALL","ACTIVE","HELD",
                              "ACTIVE_OR_HELD","UNKNOWN_ACTIVE_CALL","UNAVAILABLE"):
@@ -363,7 +384,7 @@ def confirm(bridge,detector,tmp,deadline_s=20,fast_return=True,cancel_on_timeout
                     previous=now
                     time.sleep(.35)
                     continue
-                final=capture(bridge,detector,tmp,"confirm-preclick")
+                final=action_view(capture(bridge,detector,tmp,"confirm-preclick"),"SINGLE")
                 if not stable(now,final,"SINGLE"):
                     if final.get("status")=="SINGLE" and final.get("target_verified"):
                         log("CONFIRM_PRECLICK_MOVED_REOBSERVE; NO_CLICK")
@@ -376,13 +397,15 @@ def confirm(bridge,detector,tmp,deadline_s=20,fast_return=True,cancel_on_timeout
                     if cancel_on_timeout:
                         cancel_pending(bridge,detector,tmp,reason="timeout")
                     raise RuntimeError("CONFIRM_TIMEOUT")
+                if final.get("mixed_group"):
+                    log("CONFIRM_UNIQUE_PENDING_WITH_STALE_UNAVAILABLE")
                 target=final["buttons"][0]
                 click_once(bridge,target["x"],target["y"],"CONFIRM")
                 if fast_return:
                     log("CONFIRM_SENT_FAST caller_must_verify_CallServices=true")
                     return True
                 time.sleep(1.2)
-                after=capture(bridge,detector,tmp,"confirm-after")
+                after=action_view(capture(bridge,detector,tmp,"confirm-after"),"SINGLE")
                 if after["status"]=="SINGLE":
                     raise RuntimeError("CONFIRM_CARD_STILL_PRESENT; NO_RETRY")
                 if after["status"]=="MULTIPLE":
@@ -412,7 +435,7 @@ def confirm(bridge,detector,tmp,deadline_s=20,fast_return=True,cancel_on_timeout
 
 def hangup(bridge,detector,tmp,timeout=18,recover_held=True):
     deadline=time.monotonic()+timeout
-    s=capture(bridge,detector,tmp,"hangup-first")
+    s=action_view(capture(bridge,detector,tmp,"hangup-first"),"ACTIVE")
     if s["status"]=="NONE":
         log("HANGUP_ALREADY_CLEAR")
         return True
@@ -421,6 +444,10 @@ def hangup(bridge,detector,tmp,timeout=18,recover_held=True):
             time.sleep(.55)
             s=capture(bridge,detector,tmp,f"hangup-render-{n}")
             if s["status"]!="PENDING_RENDERING":break
+    if s["status"]=="STALE_ONLY":
+        require_idle_call_center()
+        log("HANGUP_VERIFIED native_idle_with_stale_unavailable=true")
+        return True
     if s["status"]=="UNAVAILABLE":
         dismiss_unavailable(bridge,detector,tmp)
         log("HANGUP_UNAVAILABLE_DISMISSED")
@@ -460,10 +487,10 @@ def hangup(bridge,detector,tmp,timeout=18,recover_held=True):
     if time.monotonic()>=deadline:
         raise RuntimeError("HANGUP_DEADLINE_EXPIRED_BEFORE_CLICK")
     time.sleep(.3)
-    nextstate=capture(bridge,detector,tmp,"hangup-second")
+    nextstate=action_view(capture(bridge,detector,tmp,"hangup-second"),"ACTIVE")
     if not stable(s,nextstate,"ACTIVE"):
         raise RuntimeError("HANGUP_RED_BUTTON_NOT_STABLE; NO_CLICK")
-    final=capture(bridge,detector,tmp,"hangup-preclick")
+    final=action_view(capture(bridge,detector,tmp,"hangup-preclick"),"ACTIVE")
     if not stable(nextstate,final,"ACTIVE") or time.monotonic()>=deadline:
         raise RuntimeError("HANGUP_PRECLICK_UNSAFE; NO_CLICK")
     r=final["red_buttons"][0]
@@ -471,9 +498,13 @@ def hangup(bridge,detector,tmp,timeout=18,recover_held=True):
     # Do not re-click. Verify once+poll state; no other changes.
     while time.monotonic()<deadline:
         time.sleep(.75)
-        after=capture(bridge,detector,tmp,"hangup-post")
+        after=action_view(capture(bridge,detector,tmp,"hangup-post"),"ACTIVE")
         if after["status"]=="NONE":
             log("HANGUP_VERIFIED no_remaining_FaceTime_card=true")
+            return True
+        if after["status"] in ("UNAVAILABLE","STALE_ONLY"):
+            require_idle_call_center()
+            log("HANGUP_VERIFIED native_idle_with_stale_unavailable=true")
             return True
         if after["status"]!="ACTIVE":
             raise RuntimeError("HANGUP_POSTCLICK_STATE="+after["status"]+

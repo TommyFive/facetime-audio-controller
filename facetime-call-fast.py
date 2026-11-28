@@ -274,6 +274,7 @@ def kvm(args, timeout, label, run_id):
     for line in output.splitlines():
         if any(mark in line for mark in
                 ("PREFLIGHT_CLEAR","CONFIRM_CLICK_SENT","CONFIRM_SENT_FAST",
+                 "CONFIRM_UNIQUE_PENDING_WITH_STALE_UNAVAILABLE",
                  "PENDING_CANCELLED_VERIFIED","RECOVERY_ALL_CARDS_CLEARED",
                  "RECOVERY_IDLE_VERIFIED","QUIESCENT_EMPTY",
                  "RECOVERY_NOTIFICATION_RESET_SENT","RECOVERY_NOTIFICATION_RESET_VERIFIED",
@@ -283,6 +284,31 @@ def kvm(args, timeout, label, run_id):
                  "UNAVAILABLE_DISMISSED_VERIFIED")):
             log(line)
     return seconds
+
+def refresh_gui_state(previous):
+    current=call_state()
+    if current!=previous:
+        log("GUI_MODE_CHANGED "+str(previous)+" -> "+current)
+    return current
+
+
+def verified_hangup(run_id, timeout, previous):
+    current=refresh_gui_state(previous)
+    if current=="GUI_UNLOCKED":
+        try:
+            guarded([SCRIPT,"--_hangup-ax"],34,run_id,"AX hangup",
+                    env={"FACETIME_INTERNAL_HANGUP":run_id})
+            return
+        except txn.Interrupted:
+            raise
+        except (RuntimeError, subprocess.TimeoutExpired):
+            txn.check(run_id)
+            if refresh_gui_state(current)!="GUI_LOCKED":
+                raise
+            log("AX_HANGUP_FALLBACK_NANOKVM")
+    kvm(["hangup","--timeout",str(timeout)],timeout+36,
+        "NanoKVM verified hangup",run_id)
+
 
 def playback_timeout_seconds(audio_seconds):
     """Bound stalled AudioToolbox playback to rendered speech duration plus cleanup margin."""
@@ -375,6 +401,7 @@ def main(args):
                         f"render_seconds={duration:.3f}")
                     device=output_device()
                     ensure_input()
+                state=refresh_gui_state(state)
                 txn.update(run_id,"PREFLIGHT")
                 if state=="GUI_LOCKED":
                     # Reconcile old pending cards BEFORE opening a new URL,
@@ -399,6 +426,8 @@ def main(args):
                     ["/usr/bin/python3",DISPLAY_WAKE_HELPER,"--ensure-awake"],30,
                     run_id,"display preflight")
                 for line in output.strip().splitlines():log("DISPLAY "+line)
+                if refresh_gui_state(state)!=state:
+                    raise RuntimeError('GUI_CHANGED_BEFORE_DIAL; NO_URL_SENT')
                 # Journal the intent BEFORE issuing a side effect: interruption
                 # after this point may require recovery even on URL failure.
                 txn.update(run_id,"DIAL_REQUESTED",url_may_have_been_sent=True)
@@ -436,10 +465,13 @@ def main(args):
                         # do not keep polling CallServices for the full timeout.
                         if time.monotonic()-last_unavailable_check>=2:
                             last_unavailable_check=time.monotonic()
+                            state=refresh_gui_state(state)
                             # The unlocked AX and locked NanoKVM paths are
                             # independent, both requiring exact target/UI proof.
-                            unavailable=(unavailable_popup_state() if state=="GUI_UNLOCKED"
-                                         else locked_unavailable_popup_state(run_id))
+                            # On the lockscreen a previous unavailable card can
+                            # reappear after dialing; never let it preempt a fresh
+                            # CallServices connection. Inspect on disconnect/deadline.
+                            unavailable=(unavailable_popup_state() if state=="GUI_UNLOCKED" else False)
                             if unavailable:
                                 log("CALL_UNAVAILABLE_DETECTED")
                                 if state=="GUI_LOCKED":
@@ -459,6 +491,7 @@ def main(args):
                                 # Allow a short bounded window to identify it.
                                 for _ in range(3 if state=="GUI_LOCKED" else 6):
                                     txn.check(run_id)
+                                    state=refresh_gui_state(state)
                                     unavailable=(unavailable_popup_state() if state=="GUI_UNLOCKED"
                                                  else locked_unavailable_popup_state(run_id))
                                     if unavailable:
@@ -484,6 +517,7 @@ def main(args):
                             break
                         time.sleep(.15)
                     if not detected:
+                        state=refresh_gui_state(state)
                         unavailable=(unavailable_popup_state() if state=="GUI_UNLOCKED"
                                      else locked_unavailable_popup_state(run_id))
                         if unavailable:
@@ -521,12 +555,7 @@ def main(args):
                     txn.check(run_id)
                     txn.update(run_id,"HANGING_UP")
                     log("HANGUP_START")
-                    if state=="GUI_LOCKED":
-                        kvm(["hangup","--timeout",str(opt.hangup_timeout)],
-                            opt.hangup_timeout+36,"NanoKVM verified hangup",run_id)
-                    else:
-                        guarded([SCRIPT,"--_hangup-ax"],34,run_id,"AX hangup",
-                                env={"FACETIME_INTERNAL_HANGUP":run_id})
+                    verified_hangup(run_id,opt.hangup_timeout,state)
                     hangup_verified=True
                     log("HANGUP_OK")
                 except txn.Interrupted as exc:
