@@ -68,7 +68,8 @@ class TTSTests(unittest.TestCase):
         self.assertIn(self.config["minimax"]["model"],("speech-2.8-turbo","speech-2.8-hd"))
         self.assertEqual(self.config["minimax"]["voice_id"],"German_FriendlyMan")
         self.assertEqual(self.config["minimax"]["language_boost"],"German")
-        self.assertEqual(self.config["minimax"]["speed"],1.1)
+        self.assertGreaterEqual(self.config["minimax"]["speed"],0.5)
+        self.assertLessEqual(self.config["minimax"]["speed"],2.0)
         self.assertEqual(self.config["minimax"]["pitch"],0)
         self.assertEqual(self.config["minimax"]["volume"],1.0)
     def test_both_minimax_models_accepted(self):
@@ -111,7 +112,7 @@ class TTSTests(unittest.TestCase):
             tts.request_minimax("Hallo.",self.config["minimax"],
                 pathlib.Path(self.temp.name)/"hd.mp3")
         self.assertEqual(observed[0]["model"],"speech-2.8-hd")
-        self.assertEqual(observed[0]["voice_setting"]["speed"],1.1)
+        self.assertEqual(observed[0]["voice_setting"]["speed"],self.config["minimax"]["speed"])
 
     def test_hd_network_error_falls_back_to_macos(self):
         self.config["minimax"]["model"]="speech-2.8-hd"
@@ -191,7 +192,7 @@ class TTSTests(unittest.TestCase):
         payload=json.loads(request.data)
         self.assertEqual(payload["model"],self.config["minimax"]["model"])
         self.assertEqual(payload["voice_setting"]["voice_id"],"German_FriendlyMan")
-        self.assertEqual(payload["voice_setting"]["speed"],1.1)
+        self.assertEqual(payload["voice_setting"]["speed"],self.config["minimax"]["speed"])
         self.assertEqual(payload["voice_setting"]["vol"],1.0)
         self.assertEqual(payload["voice_setting"]["pitch"],0)
         self.assertEqual(payload["language_boost"],"German")

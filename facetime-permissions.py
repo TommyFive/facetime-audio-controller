@@ -57,7 +57,7 @@ def probe(run=None):
             return dict(ok=False, code="NANOKVM_ACCESS_DENIED", mode=mode,
                         message="Cannot inspect NanoKVM screen; verify Tailscale, NanoKVM access and credentials.")
         return dict(ok=True, code="PERMISSIONS_OK", mode=mode,
-                    message="NanoKVM screen inspection is authorised and reachable.")
+                    message="NanoKVM screen inspection is authorised and reachable. Locked-screen checks cannot verify microphone or all Python TCC permissions; unlock and resolve any pending permission prompts before live acceptance.", audio_permissions_verified=False)
     except subprocess.TimeoutExpired:
         return dict(ok=False, code="PERMISSION_CHECK_TIMEOUT", mode="unknown",
                     message="FaceTime automation permission check timed out.")

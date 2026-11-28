@@ -82,6 +82,7 @@ def card_ocr(rgb,y):
         SequenceMatcher(None,x,"fortsetzen").ratio()>=.70 for x in compact)
     return {
         "verified":target_like,
+        "exact_target":bool(TARGET) and any(re.sub(r"\s+","",line).casefold()==re.sub(r"\s+","",TARGET).casefold() for line in lines),
         "pending":any("anrufenklicken" in normalize(x) or
                       SequenceMatcher(None,normalize(x),"zumanrufenklicken").ratio()>=.72 for x in lines),
         "held":held,
@@ -156,8 +157,44 @@ def inspect(path,save_roi=None,require_ocr=False):
     unavailable_ok=(require_ocr and target_ok and badge_count==1 and
                     count==1 and red_count==0 and scans[0].get("unavailable")
                     and not scans[0].get("pending") and not scans[0].get("held"))
+    # Pair every physical button to exactly one OCR card by vertical geometry.
+    # Mixed groups need exact target text and mutually exclusive labels.
+    semantic=[]
+    if require_ocr and badge_count>1 and count+red_count==badge_count and target_ok:
+        used=set()
+        for kind,controls in (("green",buttons),("red",reds)):
+            for button in controls:
+                y=button["center_px"][1]
+                candidates=[i for i,b in enumerate(badges)
+                    if (10<=b["center_px"][1]-y<=75 if kind=="green"
+                        else 5<=y-b["center_px"][1]<=110)]
+                if len(candidates)!=1 or candidates[0] in used:
+                    semantic=[];break
+                i=candidates[0];used.add(i);scan=scans[i]
+                if not scan.get("exact_target") or scan.get("held") or scan.get("resume"):
+                    semantic=[];break
+                flags=[bool(scan.get(k)) for k in ("pending","unavailable","active_text")]
+                if sum(flags)!=1:
+                    semantic=[];break
+                label=("PENDING" if flags[0] else "UNAVAILABLE" if flags[1] else "ACTIVE")
+                if (kind=="red") != (label=="ACTIVE"):
+                    semantic=[];break
+                semantic.append({"kind":label,"button":button})
+            else:
+                continue
+            break
+        if len(semantic)!=badge_count: semantic=[]
+    pending_buttons=[c["button"] for c in semantic if c["kind"]=="PENDING"]
+    unavailable_buttons=[c["button"] for c in semantic if c["kind"]=="UNAVAILABLE"]
+    active_buttons=[c["button"] for c in semantic if c["kind"]=="ACTIVE"]
     # A held card without OCR certainty must NEVER become a hangup target.
-    if count>1 or red_count>1:
+    if semantic and len(pending_buttons)==1 and len(unavailable_buttons)==badge_count-1:
+        status="MIXED_PENDING"
+    elif semantic and len(active_buttons)==1 and len(unavailable_buttons)==badge_count-1:
+        status="MIXED_ACTIVE"
+    elif semantic and len(unavailable_buttons)==badge_count:
+        status="STALE_ONLY"
+    elif count>1 or red_count>1:
         status="MULTIPLE"
     elif unavailable_ok:
         status="UNAVAILABLE"
@@ -183,7 +220,9 @@ def inspect(path,save_roi=None,require_ocr=False):
             "buttons":buttons,"red_buttons":reds,"badges":badges,
             "target_verified":target_ok,"held_verified":held_ok,
             "unavailable_verified":unavailable_ok,
-            "all_pending_verified":all_pending,"ocr_checked":require_ocr}
+            "all_pending_verified":all_pending,"ocr_checked":require_ocr,
+            "semantic_cards":semantic,"pending_buttons":pending_buttons,
+            "active_buttons":active_buttons,"unavailable_buttons":unavailable_buttons}
 
 if __name__=="__main__":
     ap=argparse.ArgumentParser()

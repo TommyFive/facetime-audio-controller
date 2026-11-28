@@ -112,6 +112,18 @@ class ClickSafetyTests(unittest.TestCase):
             self.assertTrue(ui.dismiss_unavailable(bridge,None,"/tmp"))
         self.assertEqual(bridge.clicks,[(.9513,.146)])
 
+    def test_expired_unavailable_card_requires_quiet_and_native_idle(self):
+        with patch.object(ui,"capture",return_value={"status":"NONE"}), patch.object(ui,"stable_quiescence",return_value=True) as quiet, patch.object(ui,"require_idle_call_center") as idle, patch.object(ui,"click_once") as click:
+            self.assertTrue(ui.dismiss_unavailable(None,None,"/tmp"))
+            quiet.assert_called_once()
+            idle.assert_called_once()
+            click.assert_not_called()
+    def test_expired_card_with_unverified_idle_fails_closed(self):
+        with patch.object(ui,"capture",return_value={"status":"NONE"}), patch.object(ui,"stable_quiescence",return_value=True), patch.object(ui,"require_idle_call_center",side_effect=RuntimeError("BUSY")), patch.object(ui,"click_once") as click:
+            with self.assertRaisesRegex(RuntimeError,"BUSY"):
+                ui.dismiss_unavailable(None,None,"/tmp")
+            click.assert_not_called()
+
     def test_ambiguous_target_never_clicked(self):
         class Bridge:
             def click(self,*args):raise AssertionError("No click permitted")

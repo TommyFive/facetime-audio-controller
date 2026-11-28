@@ -64,7 +64,7 @@ class TTSModelTests(unittest.TestCase):
                                       pathlib.Path(folder)/"audio.mp3")
                 self.assertEqual(seen[0]["model"],name)
                 self.assertEqual(seen[0]["voice_setting"]["voice_id"],"German_FriendlyMan")
-                self.assertEqual(seen[0]["voice_setting"]["speed"],1.1)
+                self.assertEqual(seen[0]["voice_setting"]["speed"],self.config["minimax"]["speed"])
                 self.assertEqual(seen[0]["voice_setting"]["pitch"],0)
                 self.assertEqual(seen[0]["language_boost"],"German")
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.2.2 — lockscreen and audio recovery reliability (2026-11-28)
+
+- Classify each notification using OCR and verified button geometry; permit a unique pending recipient card alongside stale unavailable cards, while rejecting multiple pending or unknown cards.
+- Re-check GUI state before dialing, during answer handling and at hangup; use the locked-screen fallback if AX loses access.
+- Do not let stale locked-screen unavailable notifications preempt fresh call-service events. Verify native idle if a previously observed unavailable card expires before dismissal.
+- Clarify the limits of locked-screen permission checks and document the observed native audio crash and recovery procedure.
+- Keep payload assertions independent of the configured speech speed.
+
+
 ## 3.2.1 — bounded stale FaceTime notification recovery (2026-11-26)
 
 - After an answer timeout, allow a single guarded notification-process reset during the next locked-screen preflight if a verified, unchanged pending recipient card survives its normal cancel click.
